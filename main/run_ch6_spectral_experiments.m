@@ -9,11 +9,16 @@ function run_ch6_spectral_experiments()
 %   - runs all cases,
 %   - saves one .mat per case to output/mats/ch6/,
 %   - produces (per case):
-%       (i)   sorted eigenvalue overlay PDF
-%       (ii)  histogram overlay PDF
-%       (iii) residual history overlay PDF
+%       (i)   sorted eigenvalue overlay PDF for preconditioned operators,
+%       (ii)  histogram overlay PDF for preconditioned operators,
+%       (iii) sorted eigenvalue overlay PDF for non-preconditioned operators,
+%       (iv)  histogram overlay PDF for non-preconditioned operators,
+%       (v)   residual history overlay PDF,
 %     all saved to output/figures/ch6/,
-%   - exports a LaTeX summary table to output/tables/ch6/table_ch6_summary.tex
+%   - exports a LaTeX summary table for the preconditioned spectra and PCG
+%     convergence to output/tables/ch6/table_ch6_summary.tex,
+%   - exports a LaTeX summary table for the non-preconditioned spectra to
+%     output/tables/ch6/table_ch6_unpreconditioned_summary.tex.
 
   % ----------------------------
   % Project root + path setup
@@ -94,7 +99,8 @@ function run_ch6_spectral_experiments()
     fprintf('[run_ch6_spectral_experiments] saved: %s\n', mat_path);
 
     % ----------------------------
-    % Spectral figures (only if spectra exist for BOTH methods)
+    % Preconditioned spectral figures
+    % only if spectra exist for BOTH methods
     % ----------------------------
     if out.fetidp.spec_skipped || out.bddc.spec_skipped
       fprintf('[run_ch6_spectral_experiments] spectra skipped (no spectral figures).\n');
@@ -134,6 +140,58 @@ function run_ch6_spectral_experiments()
     end
 
     % ----------------------------
+    % Non-preconditioned spectral figures
+    % only if raw spectra exist for BOTH methods
+    % ----------------------------
+    if ~has_raw_spectra_(out)
+      fprintf('[run_ch6_spectral_experiments] raw spectra missing (no raw spectral figures).\n');
+    else
+      % (i) Sorted eigenvalue overlay for raw operators
+      raw_fig_opts = struct();
+      raw_fig_opts.yscale      = 'linear';
+      raw_fig_opts.fig_visible = 'off';
+      raw_fig_opts.mesh_n = cfg.n;
+      raw_fig_opts.sub_nx = cfg.nSubX;
+      raw_fig_opts.sub_ny = cfg.nSubY;
+      raw_fig_opts.ylabel = '\lambda_i(A)';
+      raw_fig_opts.filename = sprintf('fig_spec_raw_sorted_%s.pdf', out.case_id);
+      raw_fig_opts.title = sprintf(['Sorted eigenvalues of non-preconditioned operators ' ...
+                                    '(Mesh size: %dx%d; Subdomains: %dx%d)'], ...
+                                    cfg.n, cfg.n, cfg.nSubX, cfg.nSubY);
+
+      raw_fig_path = plot_spectrum_sorted_overlay( ...
+        out.fetidp.spec_A.eigvals, ...
+        out.bddc.spec_A.eigvals, ...
+        out.case_id, ...
+        out_figs, ...
+        raw_fig_opts);
+
+      fprintf('[run_ch6_spectral_experiments] raw sorted spectrum saved: %s\n', raw_fig_path);
+
+      % (ii) Histogram overlay for raw operators
+      raw_hist_opts = struct();
+      raw_hist_opts.fig_visible = 'off';
+      raw_hist_opts.mesh_n = cfg.n;
+      raw_hist_opts.sub_nx = cfg.nSubX;
+      raw_hist_opts.sub_ny = cfg.nSubY;
+      raw_hist_opts.xlabel = '\lambda(A)';
+      raw_hist_opts.filename = sprintf('fig_spec_raw_hist_%s.pdf', out.case_id);
+      raw_hist_opts.title = sprintf(['Eigenvalue distribution of non-preconditioned operators ' ...
+                                     '(Mesh size: %dx%d; Subdomains: %dx%d)'], ...
+                                     cfg.n, cfg.n, cfg.nSubX, cfg.nSubY);
+
+      raw_hist_path = plot_spectrum_histogram_overlay( ...
+        out.fetidp.spec_A.eigvals, ...
+        out.bddc.spec_A.eigvals, ...
+        out.case_id, ...
+        out_figs, ...
+        raw_hist_opts);
+
+      fprintf('[run_ch6_spectral_experiments] raw histogram saved: %s\n', raw_hist_path);
+    end
+
+
+    % ----------------------------
     % (iii) Residual history overlay (if resvec exists)
     % ----------------------------
     if has_resvec_(out)
@@ -159,7 +217,8 @@ function run_ch6_spectral_experiments()
   end
 
   % ----------------------------
-  % Export LaTeX summary table
+  % Export LaTeX summary table:
+  % preconditioned spectra + PCG convergence
   % ----------------------------
   table_path = fullfile(out_tables, 'table_ch6_summary.tex');
 
@@ -176,6 +235,28 @@ function run_ch6_spectral_experiments()
   export_ch6_table_tex(outs, table_path, table_opts);
 
   fprintf('[run_ch6_spectral_experiments] table saved: %s\n', table_path);
+
+  % ----------------------------
+  % Export LaTeX summary table:
+  % non-preconditioned operator spectra
+  % ----------------------------
+  raw_table_path = fullfile(out_tables, 'table_ch6_unpreconditioned_summary.tex');
+
+  raw_table_opts = struct();
+  raw_table_opts.include_table_env = true;
+  raw_table_opts.booktabs = true;
+  raw_table_opts.fontsize_cmd = '\small';
+
+  raw_table_opts.caption = ...
+    'Summary of spectral indicators for the non-preconditioned FETI-DP and BDDC operators.';
+
+  raw_table_opts.label = 'tab:ch6-unpreconditioned-summary';
+
+  export_ch6_raw_table_tex(outs, raw_table_path, raw_table_opts);
+
+  fprintf('[run_ch6_spectral_experiments] raw table saved: %s\n', raw_table_path);
+
+
   fprintf('[run_ch6_spectral_experiments] DONE\n\n');
 end
 
@@ -208,6 +289,35 @@ function tf = has_resvec_(out)
     return;
   end
   if ~isfield(out.fetidp.stats, 'resvec') || ~isfield(out.bddc.stats, 'resvec')
+    return;
+  end
+
+  tf = true;
+end
+
+function tf = has_raw_spectra_(out)
+%HAS_RAW_SPECTRA_  True if both methods contain nonempty raw spectra.
+  tf = false;
+
+  if ~isstruct(out)
+    return;
+  end
+  if ~isfield(out, 'fetidp') || ~isfield(out, 'bddc')
+    return;
+  end
+  if ~isfield(out.fetidp, 'spec_A') || ~isfield(out.bddc, 'spec_A')
+    return;
+  end
+  if ~isstruct(out.fetidp.spec_A) || ~isstruct(out.bddc.spec_A)
+    return;
+  end
+  if ~isfield(out.fetidp.spec_A, 'eigvals') || ~isfield(out.bddc.spec_A, 'eigvals')
+    return;
+  end
+  if isempty(out.fetidp.spec_A.eigvals) || isempty(out.bddc.spec_A.eigvals)
+    return;
+  end
+  if ~isnumeric(out.fetidp.spec_A.eigvals) || ~isnumeric(out.bddc.spec_A.eigvals)
     return;
   end
 

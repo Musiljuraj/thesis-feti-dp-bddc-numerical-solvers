@@ -14,11 +14,16 @@ function out = ch6_run_case(cfg)
 %     2) sets up FETI-DP and BDDC on the same instance (FETI-DP first),
 %     3) runs PCG to obtain solver diagnostics (iter, relres, resvec),
 %     4) computes the full spectra of the preconditioned PCG-seen operators,
-%        if the PCG-space dimensions are small enough.
+%        if the PCG-space dimensions are small enough,
+%     5) computes the full spectra of the corresponding non-preconditioned
+%        operators as an additional diagnostic.
 %
 % Spectra are computed using:
 %   - explicit assembly by basis-vector probing (assemble_from_apply),
-%   - Cholesky-based symmetric similarity transform (full_spectrum_precond).
+%   - Cholesky-based symmetric similarity transform for preconditioned spectra
+%     (full_spectrum_precond),
+%   - direct eigenvalue computation for raw operator spectra
+%     (full_spectrum_operator).
 %
 % Important control:
 %   Full spectra are computed only if n_method <= cfg.nmax, where n_method is:
@@ -30,8 +35,14 @@ function out = ch6_run_case(cfg)
 %         - out.cfg      : used configuration
 %         - out.case_id  : deterministic id string for filenames/captions
 %         - out.base_meta: basic problem info (no large matrices)
-%         - out.fetidp   : { n, stats, spec, spec_skipped, spec_skip_reason }
-%         - out.bddc     : { n, stats, spec, spec_skipped, spec_skip_reason }
+%         - out.fetidp   : { n, stats, spec, spec_A,
+%                            spec_skipped, spec_skip_reason }
+%         - out.bddc     : { n, stats, spec, spec_A,
+%                            spec_skipped, spec_skip_reason }
+%
+% Here:
+%   - spec   stores the spectrum of the preconditioned PCG-seen operator,
+%   - spec_A stores the spectrum of the non-preconditioned operator A.
 %
 % Notes:
 % - By default we do NOT store the full base/data structs to keep .mat small.
@@ -147,6 +158,7 @@ function out = ch6_run_case(cfg)
   require_file_('applyA_lambda');
   require_file_('applyM_lambda');
   require_file_('full_spectrum_precond');
+  require_file_('full_spectrum_operator');
 
   if cfg.verbose
     fprintf('\n[ch6_run_case] FETI-DP setup (n=%d, %dx%d)\n', cfg.n, cfg.nSubX, cfg.nSubY);
@@ -165,6 +177,7 @@ function out = ch6_run_case(cfg)
   [~, stats_f] = solve_fetidp(data_f, cfg.tol, cfg.maxit);
 
   spec_f = [];
+  spec_A_f = [];
   spec_f_skipped = false;
   spec_f_skip_reason = '';
 
@@ -174,16 +187,25 @@ function out = ch6_run_case(cfg)
       applyMinv_f = @(r) applyM_lambda(r, data_f);
 
       opts_spec = cfg.spectra;
+
+      % Spectrum of the preconditioned PCG-seen operator:
+      % M_FETI-DP^{-1} A_FETI-DP.
       spec_f = full_spectrum_precond(applyA_f, applyMinv_f, n_f, opts_spec);
+
+      % Spectrum of the non-preconditioned operator:
+      % A_FETI-DP.
+      spec_A_f = full_spectrum_operator(applyA_f, n_f, opts_spec);
     else
       spec_f_skipped = true;
       spec_f_skip_reason = sprintf('nLambda=%d exceeds nmax=%d (skip full spectrum).', n_f, cfg.nmax);
       spec_f = empty_spec_();
+      spec_A_f = empty_operator_spec_();
     end
   else
     spec_f_skipped = true;
     spec_f_skip_reason = 'cfg.do_spectra=false (skip full spectrum).';
     spec_f = empty_spec_();
+    spec_A_f = empty_operator_spec_();
   end
 
   % ----------------------------
@@ -216,6 +238,7 @@ function out = ch6_run_case(cfg)
   stats_b = sol_b.stats;
 
   spec_b = [];
+  spec_A_b = [];
   spec_b_skipped = false;
   spec_b_skip_reason = '';
 
@@ -225,16 +248,25 @@ function out = ch6_run_case(cfg)
       applyMinv_b = @(r) applyM_bddc(r, data_b);
 
       opts_spec = cfg.spectra;
+
+      % Spectrum of the preconditioned PCG-seen operator:
+      % M_BDDC^{-1} A_BDDC.
       spec_b = full_spectrum_precond(applyA_b, applyMinv_b, n_b, opts_spec);
+
+      % Spectrum of the non-preconditioned operator:
+      % A_BDDC.
+      spec_A_b = full_spectrum_operator(applyA_b, n_b, opts_spec);
     else
       spec_b_skipped = true;
       spec_b_skip_reason = sprintf('nHat=%d exceeds nmax=%d (skip full spectrum).', n_b, cfg.nmax);
       spec_b = empty_spec_();
+      spec_A_b = empty_operator_spec_();
     end
   else
     spec_b_skipped = true;
     spec_b_skip_reason = 'cfg.do_spectra=false (skip full spectrum).';
     spec_b = empty_spec_();
+    spec_A_b = empty_operator_spec_();
   end
 
   % ----------------------------
@@ -254,16 +286,18 @@ function out = ch6_run_case(cfg)
   end
 
   out.fetidp = struct();
-  out.fetidp.n               = n_f;
-  out.fetidp.stats           = stats_f;
-  out.fetidp.spec            = spec_f;
-  out.fetidp.spec_skipped    = spec_f_skipped;
+  out.fetidp.n                = n_f;
+  out.fetidp.stats            = stats_f;
+  out.fetidp.spec             = spec_f;
+  out.fetidp.spec_A           = spec_A_f;
+  out.fetidp.spec_skipped     = spec_f_skipped;
   out.fetidp.spec_skip_reason = spec_f_skip_reason;
 
   out.bddc = struct();
   out.bddc.n                 = n_b;
   out.bddc.stats             = stats_b;
   out.bddc.spec              = spec_b;
+  out.bddc.spec_A            = spec_A_b;
   out.bddc.spec_skipped      = spec_b_skipped;
   out.bddc.spec_skip_reason  = spec_b_skip_reason;
 
@@ -275,7 +309,10 @@ function out = ch6_run_case(cfg)
     relres_f = getfield_default_(stats_f, 'relres', NaN);
     fprintf('FETI-DP: nLambda=%d, iter=%d, relres=%.3e', n_f, iter_f, relres_f);
     if ~out.fetidp.spec_skipped && isfield(spec_f,'kappa')
-      fprintf(', kappa=%.3e', spec_f.kappa);
+      fprintf(', kappa(MinvA)=%.3e', spec_f.kappa);
+    end
+    if ~out.fetidp.spec_skipped && isfield(spec_A_f,'kappa')
+      fprintf(', kappa(A)=%.3e', spec_A_f.kappa);
     end
     fprintf('\n');
 
@@ -283,7 +320,10 @@ function out = ch6_run_case(cfg)
     relres_b = getfield_default_(stats_b, 'relres', NaN);
     fprintf('BDDC   : nHat=%d,   iter=%d, relres=%.3e', n_b, iter_b, relres_b);
     if ~out.bddc.spec_skipped && isfield(spec_b,'kappa')
-      fprintf(', kappa=%.3e', spec_b.kappa);
+      fprintf(', kappa(MinvA)=%.3e', spec_b.kappa);
+    end
+    if ~out.bddc.spec_skipped && isfield(spec_A_b,'kappa')
+      fprintf(', kappa(A)=%.3e', spec_A_b.kappa);
     end
     fprintf('\n\n');
   end
@@ -332,6 +372,18 @@ function s = empty_spec_()
   s.symmK     = NaN;
   s.chol_ok   = false;
   s.chol_msg  = '';
+end
+
+function s = empty_operator_spec_()
+% Provide a stable empty spec struct for raw operator spectra when skipped.
+  s = struct();
+  s.eigvals       = [];
+  s.lmin          = NaN;
+  s.lmax          = NaN;
+  s.kappa         = NaN;
+  s.symmA         = NaN;
+  s.max_imag_eig  = NaN;
+  s.n_nonpositive = NaN;
 end
 
 function v = getfield_default_(s, field, default_val)
