@@ -11,6 +11,15 @@ The code is written mainly in **GNU Octave / MATLAB-style `.m` files** and imple
 
 The repository is not meant to be a general-purpose PDE solver package. Its purpose is to make the numerical experiments in the thesis reproducible and to expose the algebraic structure of the methods: finite element assembly, substructuring, Schur complement reduction, primal constraints, FETI-DP and BDDC operator application, PCG convergence, and spectral diagnostics.
 
+## Highlights
+
+- Implemented P1 finite elements and non-overlapping substructuring.
+- Implemented matrix-free FETI-DP and BDDC operators and preconditioners.
+- Solved the reduced systems using preconditioned conjugate gradients.
+- Verified both methods against the monolithic FEM solution.
+- Analysed eigenvalue spectra and PCG convergence.
+- Added unit and integration-style tests and reproducible experiments.
+- 
 ---
 
 ## Thesis and numerical scope
