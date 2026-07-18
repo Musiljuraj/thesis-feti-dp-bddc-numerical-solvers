@@ -19,7 +19,6 @@ The repository is not meant to be a general-purpose PDE solver package. Its purp
 - Verified both methods against the monolithic FEM solution.
 - Analysed eigenvalue spectra and PCG convergence.
 - Added unit and integration-style tests and reproducible experiments.
-- 
 ---
 
 ## Thesis and numerical scope
